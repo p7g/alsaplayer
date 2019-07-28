@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+
+import mimetypes
+import os
+import signal
+import sys
+from subprocess import Popen, PIPE, DEVNULL
+
+
+def is_audio_file(path):
+    mt, _ = mimetypes.MimeTypes().guess_type(path)
+    return isinstance(mt, str) \
+        and mt.startswith('audio/') \
+        and mt != 'audio/x-mpegurl'
+
+
+def run_directory(dir):
+    mt = mimetypes.MimeTypes()
+    paths = list(filter(is_audio_file, os.listdir(dir)))
+    running_ffmpeg = None
+    running_aplay = None
+    song_index = 0
+
+    def stop():
+        for p in (running_aplay, running_ffmpeg):
+            if p is not None:
+                p.terminate()
+
+    while True:
+        stop()
+
+        if song_index > len(paths):
+            return
+        if song_index < 0:
+            song_index = 0
+
+        path = paths[song_index]
+
+        print(f'Now playing {song_index+1}/{len(paths)}: {os.path.basename(path)}')
+        running_ffmpeg = Popen(
+            ('ffmpeg', '-i', path, '-f', 'wav', '-'),
+            stdin=DEVNULL,
+            stdout=PIPE,
+            stderr=DEVNULL,
+        )
+        running_process = Popen(
+            ('aplay', '-f', 'cd'),
+            stdin=running_ffmpeg.stdout,
+            stdout=DEVNULL,
+            stderr=DEVNULL,
+        )
+
+        while True:
+            try:
+                instruction = input('> ')
+            except EOFError:
+                print('')
+                continue
+
+            if instruction in ('help', '?'):
+                print('''\
+Commands:
+	help		Show this help message
+	next		Skip the current song
+	prev, previous	Return to the previous song
+	pause		Pause the current song
+	play		Resume the current song
+	quit, exit	Exit the program
+''')
+            elif instruction == 'next':
+                song_index += 1
+                break
+            elif instruction in ('previous', 'prev'):
+                song_index -= 1
+                break
+            elif instruction == 'pause':
+                running_ffmpeg.send_signal(signal.SIGSTOP)
+                print('Paused')
+            elif instruction == 'play':
+                running_ffmpeg.send_signal(signal.SIGCONT)
+                print('Resumed')
+            elif instruction in ('quit', 'exit'):
+                stop()
+                print('bye')
+                return
+            else:
+                print('Unrecognized input')
+
+
+usage = '''\
+usage: %s [<music dir>]
+
+Arguments:
+        music dir:	The directory with audio files to be played
+
+'''
+
+
+if __name__ == '__main__':
+    if len(sys.argv) == 2:
+        music_dir = sys.argv[1]
+    elif len(sys.argv) == 1:
+        music_dir = '.'
+    else:
+        print(usage % sys.argv[0])
+        exit(1)
+
+    try:
+        run_directory(music_dir)
+    except KeyboardInterrupt:
+        pass
