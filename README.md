@@ -1,5 +1,7 @@
 # alsaplayer
 
+A small Python program to play audio files using `ffmpeg` and `aplay`.
+
 To use it:
 
 1. Download it
@@ -25,4 +27,4 @@ naturally you can't go backwards. This is something I plan to address.
 ## Requirements
 
 This application has no Python dependencies other than Python 3, though you must
-also have alsa and ffmpeg installed.
+also have `alsa` and `ffmpeg` installed.
