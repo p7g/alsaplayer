@@ -162,7 +162,4 @@ if __name__ == '__main__':
     else:
         paths = [name]
 
-    try:
-        run_files(list(filter(is_audio_file, paths)))
-    except KeyboardInterrupt:
-        pass
+    run_files(list(filter(is_audio_file, paths)))
