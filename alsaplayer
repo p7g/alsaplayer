@@ -2,8 +2,10 @@
 
 import mimetypes
 import os
+import queue
 import signal
 import sys
+import threading
 from subprocess import Popen, PIPE, DEVNULL
 
 
@@ -24,70 +26,48 @@ def start_player(input):
                  stderr=DEVNULL)
 
 
-class Playlist:
-    def __init__(self, files):
-        self.position = 0
-        self.files = list(files)
+def collect_input(q, prompt):
+    while True:
+        try:
+            instruction = input(prompt)
+        except EOFError:
+            print('')
+            continue
 
-    @property
-    def current(self):
-        return self.files[self.position]
+        if instruction in ('?', 'help'):
+            print(command_usage)
+            continue
+        if instruction not in ('next', 'pause', 'play', 'quit', 'exit'):
+            print('Unrecognized input')
+            continue
+
+        q.put(instruction)
 
 
 class Player:
-    def __init__(self, playlist):
+    def __init__(self):
         super().__init__()
         self.running_ffmpeg = None
         self.running_aplay = None
-        self.playlist = playlist
 
     def stop(self):
         for p in (self.running_aplay, self.running_ffmpeg):
             if p is not None:
                 p.terminate()
 
-    def play(self):
-        while True:
-            self.stop()
+    def pause(self):
+        self.running_ffmpeg.send_signal(signal.SIGSTOP)
 
-            if self.playlist.position > len(self.playlist.files):
-                return
-            if self.playlist.position < 0:
-                self.playlist.position = 0
+    def resume(self):
+        self.running_ffmpeg.send_signal(signal.SIGCONT)
 
-            path = self.playlist.current
-            self.running_ffmpeg = start_decoder(path)
-            self.running_aplay = start_player(self.running_ffmpeg.stdout)
+    def play(self, path):
+        self.stop()
 
-            print('Now playing '
-                  f'{self.playlist.position+1}/{len(self.playlist.files)}: '
-                  f'{os.path.basename(path)}')
+        self.running_ffmpeg = start_decoder(path)
+        self.running_aplay = start_player(self.running_ffmpeg.stdout)
 
-            while True:
-                try:
-                    instruction = input('> ')
-                except EOFError:
-                    print('')
-                    continue
-
-                if instruction in ('help', '?'):
-                    print(command_usage)
-                elif instruction == 'next':
-                    self.playlist.position += 1
-                    break
-                elif instruction in ('previous', 'prev'):
-                    self.playlist.position -= 1
-                    break
-                elif instruction == 'pause':
-                    self.running_ffmpeg.send_signal(signal.SIGSTOP)
-                elif instruction == 'play':
-                    self.running_ffmpeg.send_signal(signal.SIGCONT)
-                elif instruction in ('quit', 'exit'):
-                    self.stop()
-                    print('bye')
-                    return
-                else:
-                    print('Unrecognized input')
+        print(f'Now playing: {os.path.basename(path)}')
 
 
 command_usage = '''\
@@ -101,8 +81,69 @@ Commands:
 '''
 
 
+class PlayerThread(threading.Thread):
+    def __init__(self, file_queue, instruction_queue, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.shutdown_flag = threading.Event()
+        self.file_queue = file_queue
+        self.instruction_queue = instruction_queue
+
+    def run(self):
+        player = Player()
+
+        while True:
+            if self.shutdown_flag.is_set():
+                player.stop()
+                return
+
+            if not self.instruction_queue.empty():
+                instruction = self.instruction_queue.get()
+                if instruction == 'next':
+                    player.stop()
+                    if self.file_queue.empty():
+                        return
+                    player.play(self.file_queue.get())
+                elif instruction == 'pause':
+                    player.pause()
+                    print('Paused')
+                elif instruction == 'play':
+                    print('Resuming')
+                    player.resume()
+                elif instruction in ('quit', 'exit'):
+                    player.stop()
+                    print('bye')
+                    return
+
+            if player.running_aplay is not None \
+                    and player.running_aplay.poll() is not None:
+                player.stop()
+                if self.file_queue.empty():
+                    return
+                player.play(self.file_queue.get())
+
+            if player.running_aplay is None and not self.file_queue.empty():
+                player.play(self.file_queue.get())
+
+
 def run_files(paths):
-    Player(Playlist(paths)).play()
+    input_queue = queue.Queue()
+    file_queue = queue.Queue()
+
+    input_thread = threading.Thread(target=collect_input,
+                                    args=[input_queue, ''],
+                                    daemon=True)
+    player_thread = PlayerThread(file_queue, input_queue)
+
+    for path in paths:
+        file_queue.put(path)
+
+    input_thread.start()
+    player_thread.start()
+
+    signal.signal(signal.SIGTERM, lambda *a: player_thread.shutdown_flag.set())
+    signal.signal(signal.SIGINT, lambda *a: player_thread.shutdown_flag.set())
+
+    player_thread.join()
 
 
 usage = '''\
