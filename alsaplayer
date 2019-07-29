@@ -163,11 +163,11 @@ if __name__ == '__main__':
     name = sys.argv[1] if len(sys.argv) == 2 else '.'
 
     if os.path.isdir(name):
-        paths = list(filter(is_audio_file, os.listdir(name)))
+        paths = os.listdir(name)
     else:
         paths = [name]
 
     try:
-        run_files(paths)
+        run_files(list(filter(is_audio_file, paths)))
     except KeyboardInterrupt:
         pass
