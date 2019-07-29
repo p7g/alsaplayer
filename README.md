@@ -24,5 +24,5 @@ naturally you can't go backwards. This is something I plan to address.
 
 ## Requirements
 
-This application has no Python dependencies other than than you are using Python
-3, though you must also have alsa and ffmpeg installed.
+This application has no Python dependencies other than Python 3, though you must
+also have alsa and ffmpeg installed.
